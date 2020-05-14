@@ -1,0 +1,19 @@
+{
+  "name": "n'alt text",
+  "version": "0.0.1",
+  "manifest_version": 2,
+  "description": "Image alt text? Nah!",
+  "icons": {
+  },
+  "default_locale": "en",
+  "background": {
+    "scripts": ["src/bg/background.js"],
+    "persistent": false
+  },
+  "browser_action": {
+    "default_title": "n'alt text"
+  },
+  "permissions": [
+    "activeTab"
+  ]
+}
