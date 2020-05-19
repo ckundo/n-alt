@@ -1,6 +1,6 @@
 {
   "name": "n'alt text",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "manifest_version": 2,
   "description": "See where image alt text is present, and give the middle finger where it's missing.",
   "icons": {
