@@ -2,137 +2,216 @@ baseline = [
   "img"
 ];
 
-reject = [
-  "script",
-  "iframe",
-  "style"
-]
+const load = () => {
+  viewer = document.querySelector("#aom-viewer") || document.createElement("div");
+  viewer.height = document.body.clientHeight;
+  viewer.width = document.body.clientWidth;
+  viewer.style.display = "inline-block";
+  viewer.id = "aom-viewer";
+  viewer.setAttribute("aria-hidden", true);
 
-els = document.querySelectorAll(baseline.join(", "));
+  document.body.appendChild(viewer);
 
-viewer = document.querySelector("#aom-viewer") || document.createElement("div");
-viewer.height = document.body.clientHeight;
-viewer.width = document.body.clientWidth;
-viewer.style.display = "inline-block";
-viewer.id = "aom-viewer";
+  document.addEventListener("keypress", (e) => {
+    if (e.keyCode === 27) {
+      viewer.innerHTML = null;
+    }
+  });
 
-document.body.appendChild(viewer);
+  document.addEventListener("keydown", (e) => {
+    if (e.keyCode === 17) {
+      viewer.style.display = "none";
+    }
+  });
 
-document.addEventListener("keydown", (e) => {
-  if (e.keyCode === 17) {
-    viewer.style.display = "none";
-  }
-});
+  document.addEventListener("keyup", (e) => {
+    if (e.keyCode === 17) {
+      viewer.style.display = "inline-block";
+    }
+  });
 
-document.addEventListener("keyup", (e) => {
-  if (e.keyCode === 17) {
-    viewer.style.display = "inline-block";
-  }
-});
+  const observer = new MutationObserver(async (mutations, observer) => {
+    let images = [];
 
-els.forEach(async el => {
-  let accessibility = { name: el.alt }
+    mutations.forEach(mutation => {
+      mutation.addedNodes.forEach(node => {
+        if (node.nodeName === "IMG" || (node.style && node.style.backgroundImage)) {
+          images.push(node);
+        }
+      });
 
-  try {
-    accessibility = await window.getComputedAccessibleNode(el);
-  } catch {
-    console.log("enable full n'alt text features here: chrome://flags/#enable-experimental-web-platform-features");
-  }
+      mutation.removedNodes.forEach(node => {
+        try {
+          let removed = [];
+          let url = "";
 
-  const rect = el.getBoundingClientRect();
-  const overlay = document.createElement("span");
+          if (node.nodeName === "IMG") {
+            removed.push(node);
+          } else if (node.childNodes.length > 0) {
+            removed = node.querySelectorAll("img");
+          }
 
-  el.classList.add("aom-viewer-seen");
-  viewer.appendChild(overlay);
-  overlay.className = "aom-viewer";
-  overlay.style.position = "absolute";
-  overlay.style.left = window.scrollX + rect.left + "px";
-  overlay.style.top = window.scrollY + rect.top + "px";
-  overlay.style.height = rect.height + "px";
-  overlay.style.width = rect.width + "px";
-  overlay.style.zIndex = 9999;
-  overlay.style.backgroundColor = "#fff";
+          removed.forEach(node => {
+            let overlay = null;
 
-  if (accessibility.name === null ||
-    accessibility.name.trim() === "" ||
-    accessibility.name.toLowerCase() === "image") {
+            if (node.src) {
+              url = new URL(node.src);
+              overlay = document.querySelector(`[data-nalt-source*='${url.pathname}']`);
+            }
 
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    svg.appendChild(text);
-    overlay.appendChild(svg);
+            if (overlay) {
+              overlay.remove();
+            }
+          });
 
-    svg.style.width = "100%";
-    svg.viewBox.baseVal.width = 17;
-    svg.viewBox.baseVal.height = 21;
-    text.setAttributeNS(null, "x", 2);
-    text.setAttributeNS(null, "y", 13);
-    text.textContent = "🖕";
-  } else {
-    el.classList.add("aom-viewer-labelled")
-    overlay.innerText = accessibility.name;
-    overlay.title = accessibility.name;
-  }
-})
+          // TODO: check background images
+          // if (node.style && node.style.backgroundImage) {
+          //   url = new URL(node.style.backgroundImage.replace("url(", "").replace("\"", ""));
+          //   document.querySelector(`[data-nalt-source*='${url.pathname}']`).remove();
+          // }
+        } catch (error) {
+          // TODO: create error object
+          console.warn("whoops, n'alt text failed.", error);
+        };
+      });
 
-skip = [...baseline]
+      if (mutation.attributeName === "src" && node.target.nodeName === "IMG") {
+        naltify(mutation.target, mutation.target.getAttribute("alt"))
+      }
 
-filter = {
-  acceptNode: (node) => {
-    const tag = node.tagName.toLowerCase();
-    if (reject.includes(tag) ||
-      node.id === "aom-viewer" ||
-      node.className === "aom-viewer" ||
-      node.classList.contains("aom-viewer-labelled") ||
-      node.classList.contains("aom-viewer-seen")
-    ) {
-      return NodeFilter.FILTER_REJECT;
-    } else if (skip.includes(tag) ||
-      (tag === "div" && tag.role === null)
-    ) {
-      return NodeFilter.FILTER_SKIP;
-    } else {
-      return NodeFilter.FILTER_ACCEPT;
+      if (mutation.attributeName === "style") {
+        // TODO: check if became hidden and remove overlay
+      }
+    });
+
+    images.forEach(el => naltify(el, el.getAttribute("alt")));
+  });
+
+  var config = { attributes: true, childList: true, subtree: true, characterData: false };
+
+  observer.observe(document.body, config);
+
+  naltify = async (el, alt = null) => {
+    try {
+      if (el.ariaLabel !== null) {
+        alt = el.ariaLabel;
+      }
+
+      if (alt.length > 0 && (alt.toLowerCase() === "embedded video" ||
+        alt.toLowerCase().startsWith("no alt") ||
+        alt.toLowerCase() === "image")) {
+        alt = "";
+      }
+
+      let accessibility = { name: alt }
+
+      const rect = el.getBoundingClientRect();
+      const overlay = document.createElement("span");
+
+      viewer.appendChild(overlay);
+
+      if (el.src) {
+        let url = new URL(el.src);
+        overlay.dataset.naltSource = url.origin + url.pathname;
+      }
+
+      overlay.style.position = "absolute";
+      overlay.style.left = window.scrollX + rect.left + "px";
+      overlay.style.top = window.scrollY + rect.top + "px";
+      overlay.style.height = rect.height + "px";
+      overlay.style.width = rect.width + "px";
+      overlay.style.zIndex = 9999;
+      overlay.style.backgroundColor = "transparent";
+
+      if (accessibility.name !== null && accessibility.name.trim() === "") {
+        // TODO: create SVG once.
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+
+        if (el.style.backgroundImage) {
+          url = new URL(el.style.backgroundImage.replace("url(", "").replace("\"", ""));
+          overlay.dataset.naltSource = `${url.origin}${url.pathname}`;
+        }
+
+        overlay.title = "decorative image... orly?"
+        el.title = "decorative image... orly?"
+        svg.appendChild(text);
+        overlay.appendChild(svg);
+
+        svg.style.width = "100%";
+        svg.viewBox.baseVal.width = 17;
+        svg.viewBox.baseVal.height = 21;
+        text.setAttributeNS(null, "x", 2);
+        text.setAttributeNS(null, "y", 13);
+        text.textContent = "💩";
+      } else if (accessibility.name === null) {
+        overlay.title = "wtf no alt text!"
+        el.title = "wtf no alt text!"
+
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        svg.appendChild(text);
+        overlay.appendChild(svg);
+
+        svg.style.width = "100%";
+        svg.viewBox.baseVal.width = 17;
+        svg.viewBox.baseVal.height = 21;
+        text.setAttributeNS(null, "x", 2);
+        text.setAttributeNS(null, "y", 13);
+        text.textContent = "🖕";
+      } else {
+        el.classList.add("aom-viewer-labelled")
+        overlay.title = accessibility.name;
+      }
+    } catch (error) {
+      console.warn("failed to n'altify: ", error);
     }
   }
-};
 
-treeWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, filter);
+  els = document.querySelectorAll(baseline.join(", "));
+  els.forEach(el => naltify(el, el.getAttribute("alt")));
+}
 
-paused = false;
+try {
+  load();
+} catch (error) {
+  console.warn("n'altify general error: ", error);
+}
 
-run = async () => {
-  while (!paused && (node = treeWalker.nextNode())) {
-    node.classList.add("aom-viewer-seen");
+// TODO: check background images.
 
-    const rect = node.getBoundingClientRect();
-    const accessibility = await window.getComputedAccessibleNode(node);
-    const overlay = document.createElement("span");
+// reject = [
+//   "script",
+//   "iframe",
+//   "style"
+// ]
 
-    overlay.className = "aom-viewer";
-    overlay.style.position = "absolute";
-    overlay.style.display = "flex"
-    overlay.style.justifyContent = "center";
-    overlay.style.left = window.scrollX + rect.left + "px";
-    overlay.style.top = window.scrollY + rect.top + "px";
-    overlay.style.height = rect.height + "px";
-    overlay.style.width = rect.width + "px";
-    overlay.style.color = "rgba(0,0,0,1)";
-    overlay.style.zIndex = 9999;
-    overlay.style.overflow = "hidden";
+// skip = [...baseline]
 
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    svg.appendChild(text);
-    overlay.appendChild(svg);
+// filter = {
+//   acceptNode: (node) => {
+//     const tag = node.tagName.toLowerCase();
+//     if (reject.includes(tag) ||
+//       node.id === "aom-viewer" ||
+//       node.className === "aom-viewer"
+//     ) {
+//       return NodeFilter.FILTER_REJECT;
+//     } else if (skip.includes(tag) ||
+//       (tag === "div" && tag.role === null)
+//     ) {
+//       return NodeFilter.FILTER_SKIP;
+//     } else {
+//       return NodeFilter.FILTER_ACCEPT;
+//     }
+//   }
+// };
 
-    svg.style.width = "100%";
-    svg.viewBox.baseVal.width = 17;
-    svg.viewBox.baseVal.height = 21;
-    text.setAttributeNS(null, "x", 2);
-    text.setAttributeNS(null, "y", 13);
-    text.textContent = accessibility.name;
-  }
-};
+// treeWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, filter);
 
-run();
+// run = async () => {
+//   while (node = treeWalker.nextNode()) {
+//     if (node.style.backgroundImage) {
+//       naltify(node, "");
+//     }
+//   }
+// }
